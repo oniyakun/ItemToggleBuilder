@@ -34,6 +34,14 @@
         {"k": "btn_remove", "v": "削除"},
         {"k": "label_item_count", "v": "{0} / 8"},
         {"k": "msg_error_too_many_items", "v": "生成できません：項目数が8を超えるグループがあります。"},
-        {"k": "msg_auto_split_warning", "v": "項目数が8を超えるグループがあります。自動的に複数のページに分割されます。"}
+        {"k": "msg_auto_split_warning", "v": "項目数が8を超えるグループがあります。自動的に複数のページに分割されます。"},
+        {"k": "btn_merge_group", "v": "トグルに結合"},
+        {"k": "label_group_toggle_fmt", "v": "[グループ] {0} オブジェクト"},
+        {"k": "default_group_toggle_name", "v": "新規トグル"},
+        {"k": "msg_merge_error_min", "v": "結合するには2つ以上の項目を選択してください。"},
+        {"k": "btn_ungroup", "v": "グループ解除"},
+        {"k": "btn_add_group_toggle", "v": "グループトグルを追加"},
+        {"k": "tooltip_drag_renderer", "v": "Rendererをここにドラッグ"},
+        {"k": "btn_move_selected_here", "v": "選択項目をここに移動"}
     ]
 }

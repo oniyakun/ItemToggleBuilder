@@ -34,6 +34,14 @@
         {"k": "btn_remove", "v": "Remove"},
         {"k": "label_item_count", "v": "{0} / 8"},
         {"k": "msg_error_too_many_items", "v": "Cannot generate: One or more groups exceed the 8-item limit."},
-        {"k": "msg_auto_split_warning", "v": "Some groups exceed 8 items. They will be split into multiple pages automatically."}
+        {"k": "msg_auto_split_warning", "v": "Some groups exceed 8 items. They will be split into multiple pages automatically."},
+        {"k": "btn_merge_group", "v": "Merge to Toggle"},
+        {"k": "label_group_toggle_fmt", "v": "[Group] {0} objects"},
+        {"k": "default_group_toggle_name", "v": "New Toggle"},
+        {"k": "msg_merge_error_min", "v": "Select at least 2 items to merge."},
+        {"k": "btn_ungroup", "v": "Ungroup"},
+        {"k": "btn_add_group_toggle", "v": "Add Group Toggle"},
+        {"k": "tooltip_drag_renderer", "v": "Drag Renderer Here"},
+        {"k": "btn_move_selected_here", "v": "Move Selected Here"}
     ]
 }

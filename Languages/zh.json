@@ -34,6 +34,14 @@
         {"k": "btn_remove", "v": "删除"},
         {"k": "label_item_count", "v": "{0} / 8"},
         {"k": "msg_error_too_many_items", "v": "无法生成：存在超过8个项目的分组。"},
-        {"k": "msg_auto_split_warning", "v": "部分分组超过8个项目，将自动拆分为多个分页。"}
+        {"k": "msg_auto_split_warning", "v": "部分分组超过8个项目，将自动拆分为多个分页。"},
+        {"k": "btn_merge_group", "v": "合并为开关组"},
+        {"k": "label_group_toggle_fmt", "v": "[组] {0} 个对象"},
+        {"k": "default_group_toggle_name", "v": "开关组"},
+        {"k": "msg_merge_error_min", "v": "请至少选择2个物品进行合并。"},
+        {"k": "btn_ungroup", "v": "解散分组"},
+        {"k": "btn_add_group_toggle", "v": "添加开关组"},
+        {"k": "tooltip_drag_renderer", "v": "拖拽配件到此处"},
+        {"k": "btn_move_selected_here", "v": "将选中项移入"}
     ]
 }

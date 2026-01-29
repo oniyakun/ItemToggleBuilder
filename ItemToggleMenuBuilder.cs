@@ -22,9 +22,14 @@ public class ItemToggleMenuBuilder : EditorWindow
     private class ToggleItem
     {
         public bool isHeader;
-        public string title;      // For header
+        public string title;      // For header or Group Name
         public Renderer renderer; // For item
         public bool selected;     // Selection state
+
+        // Group Logic
+        public bool isGroup;
+        public List<Renderer> groupRenderers;
+        public bool isExpanded;
     }
 
     // ===== Common Settings =====
@@ -169,6 +174,10 @@ public class ItemToggleMenuBuilder : EditorWindow
             {
                 AddGroupHeader();
             }
+            if (GUILayout.Button(ItemToggleLocalization.Get("btn_add_group_toggle"), GUILayout.Width(150)))
+            {
+                AddGroupToggle();
+            }
         }
 
         if (_items == null)
@@ -257,9 +266,154 @@ public class ItemToggleMenuBuilder : EditorWindow
 
     private void AddGroupHeader()
     {
-        _items.Add(new ToggleItem { isHeader = true, title = ItemToggleLocalization.Get("default_group_name") });
+        string baseName = ItemToggleLocalization.Get("default_group_name");
+        int nextId = 1;
+        while (_items.Any(x => x.title == $"{baseName} {nextId}")) nextId++;
+
+        _items.Add(new ToggleItem { isHeader = true, title = $"{baseName} {nextId}" });
         BuildReorderableList();
         _rl.index = _items.Count - 1;
+    }
+
+    private void AddGroupToggle()
+    {
+        string baseName = ItemToggleLocalization.Get("default_group_toggle_name");
+        int nextId = 1;
+        // Simple heuristic for naming
+        while (_items.Any(x => x.title == $"{baseName} {nextId}")) nextId++;
+        
+        var newItem = new ToggleItem
+        {
+            isHeader = false,
+            isGroup = true,
+            title = $"{baseName} {nextId}",
+            groupRenderers = new List<Renderer>(),
+            selected = true,
+            isExpanded = true
+        };
+        int idx = 0;
+        if (_items.Count > 0 && _items[0].isHeader) idx = 1;
+        _items.Insert(idx, newItem);
+        
+        BuildReorderableList();
+        _rl.index = idx;
+    }
+
+    private void HandleDragDropMove(int srcIndex, ToggleItem targetGroup)
+    {
+        if (srcIndex < 0 || srcIndex >= _items.Count) return;
+        var item = _items[srcIndex];
+        
+        if (item.isGroup || item.isHeader) return; // Only allow moving single items
+        
+        if (targetGroup.groupRenderers == null) targetGroup.groupRenderers = new List<Renderer>();
+        if (item.renderer != null) targetGroup.groupRenderers.Add(item.renderer);
+        
+        // Remove the source item safely
+        _items.RemoveAt(srcIndex);
+        
+        targetGroup.isExpanded = true; // Auto expand to show
+        
+        // No need to rebuild full list, just repaint, but rebuilding is safer for indices
+        // BuildReorderableList(); // Avoid full rebuild to keep drag valid? No, we need it.
+        // Actually, we should delay the list update slightly or just repaint
+        EditorApplication.delayCall += () => {
+             BuildReorderableList();
+             Repaint();
+        };
+    }
+
+    // Helper to cleanup duplicates when added manually to a group
+    private void RemoveDuplicateRendererFromList(Renderer r)
+    {
+        if (r == null) return;
+        bool removed = false;
+        // Search backwards to safely remove
+        for (int i = _items.Count - 1; i >= 0; i--)
+        {
+            var it = _items[i];
+            // Don't remove headers, don't remove groups, don't remove the *current* item if we were checking inside itself (though logic calls this from group)
+            if (!it.isHeader && !it.isGroup && it.renderer == r)
+            {
+                _items.RemoveAt(i);
+                removed = true;
+            }
+        }
+        
+        if (removed)
+        {
+            EditorApplication.delayCall += () => {
+                BuildReorderableList();
+                Repaint();
+            };
+        }
+    }
+
+    private void UngroupItem(int index)
+    {
+        if (index < 0 || index >= _items.Count) return;
+        var item = _items[index];
+        if (!item.isGroup) return;
+
+        // Move renderers out to standalone items
+        if (item.groupRenderers != null)
+        {
+            int insertIdx = index + 1;
+            foreach (var r in item.groupRenderers)
+            {
+                if (r == null) continue;
+                _items.Insert(insertIdx, new ToggleItem { isHeader = false, renderer = r, selected = true });
+                insertIdx++;
+            }
+        }
+        _items.RemoveAt(index);
+        BuildReorderableList();
+    }
+
+    private void RemoveFromGroup(ToggleItem groupItem, int rendererIndex)
+    {
+        if (groupItem.groupRenderers == null || rendererIndex < 0 || rendererIndex >= groupItem.groupRenderers.Count) return;
+        
+        var r = groupItem.groupRenderers[rendererIndex];
+        groupItem.groupRenderers.RemoveAt(rendererIndex);
+        
+        int groupIdx = _items.IndexOf(groupItem);
+        if (groupIdx >= 0 && r != null)
+        {
+            _items.Insert(groupIdx + 1, new ToggleItem { isHeader = false, renderer = r, selected = true });
+        }
+        BuildReorderableList();
+    }
+
+    private void MoveSelectedToGroup(ToggleItem groupItem)
+    {
+        var selectedIndices = new List<int>();
+        for (int i = 0; i < _items.Count; i++)
+        {
+            var it = _items[i];
+            // Only select non-header, non-group, selected items
+            if (!it.isHeader && !it.isGroup && it.selected && it != groupItem) 
+                selectedIndices.Add(i);
+        }
+
+        if (selectedIndices.Count == 0) return;
+
+        if (groupItem.groupRenderers == null) groupItem.groupRenderers = new List<Renderer>();
+
+        foreach (var idx in selectedIndices)
+        {
+            var it = _items[idx];
+            if (it.renderer != null) groupItem.groupRenderers.Add(it.renderer);
+        }
+
+        // Remove from list backwards
+        for (int i = selectedIndices.Count - 1; i >= 0; i--)
+        {
+            _items.RemoveAt(selectedIndices[i]);
+        }
+        
+        groupItem.isExpanded = true;
+        BuildReorderableList();
     }
 
     private void SelectByEnabled(bool select)
@@ -278,13 +432,25 @@ public class ItemToggleMenuBuilder : EditorWindow
     {
         if (_items == null) return;
 
+        // draggable: true allows standard reordering (Use standard left handle)
         _rl = new UnityEditorInternal.ReorderableList(_items, typeof(ToggleItem), true, false, false, false);
         _rl.elementHeightCallback = (index) => 
         {
             if (index >= _items.Count) return 0;
             var item = _items[index];
             if (showSelectedOnly && !item.isHeader && !item.selected) return 0; // Hide unselected
-            return item.isHeader ? EditorGUIUtility.singleLineHeight + 6 : EditorGUIUtility.singleLineHeight + 2;
+            
+            if (item.isHeader) return EditorGUIUtility.singleLineHeight + 6;
+            
+            float h = EditorGUIUtility.singleLineHeight + 2;
+            if (item.isGroup && item.isExpanded)
+            {
+                int count = item.groupRenderers != null ? item.groupRenderers.Count : 0;
+                // Items + 1 for Add field
+                h += (count + 1) * (EditorGUIUtility.singleLineHeight + 2);
+                h += 4; // Padding
+            }
+            return h;
         };
 
         _rl.drawElementCallback = (rect, index, isActive, isFocused) =>
@@ -301,7 +467,6 @@ public class ItemToggleMenuBuilder : EditorWindow
                 rect.height = EditorGUIUtility.singleLineHeight;
                 EditorGUI.DrawRect(new Rect(rect.x - 2, rect.y - 2, rect.width + 4, rect.height + 4), new Color(0.2f, 0.2f, 0.2f, 1f));
                 
-                // Count items in this group
                 int count = 0;
                 for (int i = index + 1; i < _items.Count; i++)
                 {
@@ -316,16 +481,13 @@ public class ItemToggleMenuBuilder : EditorWindow
                 float buttonW = 50;
                 float countW = 100;
                 
-                // Title Field
                 item.title = EditorGUI.TextField(new Rect(rect.x, rect.y, rect.width - buttonW - countW - 5, rect.height), item.title);
                 
-                // Count Label
                 var style = new GUIStyle(EditorStyles.label);
                 style.normal.textColor = countColor;
                 style.alignment = TextAnchor.MiddleRight;
                 EditorGUI.LabelField(new Rect(rect.x + rect.width - buttonW - countW, rect.y, countW, rect.height), countLabel, style);
 
-                // Remove Button
                 if (GUI.Button(new Rect(rect.x + rect.width - buttonW, rect.y, buttonW, rect.height), ItemToggleLocalization.Get("btn_remove")))
                 {
                     EditorApplication.delayCall += () => {
@@ -336,23 +498,155 @@ public class ItemToggleMenuBuilder : EditorWindow
             }
             else
             {
-                // Draw Renderer Item
-                if (item.renderer == null) return;
                 rect.y += 1;
-                rect.height = EditorGUIUtility.singleLineHeight;
+                float lineHeight = EditorGUIUtility.singleLineHeight;
+                rect.height = lineHeight;
 
-                var checkRect = new Rect(rect.x, rect.y, 20, rect.height);
+                var checkRect = new Rect(rect.x, rect.y, 20, lineHeight);
                 item.selected = EditorGUI.Toggle(checkRect, item.selected);
-
                 float x = rect.x + 24;
-                string path = GetRelativePath(item.renderer.transform);
-                string label = $"{item.renderer.name}   <color=#888>({path})</color>";
-                
-                var style = new GUIStyle(EditorStyles.label) { richText = true };
-                var c = GUI.color;
-                GUI.color = item.renderer.enabled ? Color.white : new Color(1f, 1f, 1f, 0.6f);
-                EditorGUI.LabelField(new Rect(x, rect.y, rect.width - x, rect.height), label, style);
-                GUI.color = c;
+
+                if (item.isGroup)
+                {
+                    // === Drop Zone Logic ===
+                    if (Event.current.type == EventType.DragUpdated || Event.current.type == EventType.DragPerform)
+                    {
+                        if (rect.Contains(Event.current.mousePosition))
+                        {
+                            var draggedIdxObj = DragAndDrop.GetGenericData("ItemToggle_Index");
+                            // Case 1: Dragging internal Custom Handle
+                            if (draggedIdxObj is int draggedIdx && draggedIdx != index)
+                            {
+                                DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                                if (Event.current.type == EventType.DragPerform)
+                                {
+                                    DragAndDrop.AcceptDrag();
+                                    HandleDragDropMove(draggedIdx, item);
+                                    Event.current.Use();
+                                }
+                            }
+                            // Case 2: Dragging Objects (e.g. from Hierarchy or Project)
+                            else if (DragAndDrop.objectReferences.Length > 0)
+                            {
+                                DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+                                if (Event.current.type == EventType.DragPerform)
+                                {
+                                    DragAndDrop.AcceptDrag();
+                                    foreach (var obj in DragAndDrop.objectReferences)
+                                    {
+                                        if (obj is Renderer r)
+                                        {
+                                            if (item.groupRenderers == null) item.groupRenderers = new List<Renderer>();
+                                            item.groupRenderers.Add(r);
+                                            RemoveDuplicateRendererFromList(r); // Auto remove from list
+                                        }
+                                    }
+                                    Event.current.Use();
+                                }
+                            }
+                        }
+                    }
+
+                    // Group Header Line
+                    item.isExpanded = EditorGUI.Foldout(new Rect(x, rect.y, 20, lineHeight), item.isExpanded, "");
+                    x += 16;
+
+                    // Title
+                    float btnW = 80;
+                    float moveW = 120;
+                    float nameW = rect.width - (x - rect.x) - btnW - moveW - 10;
+                    item.title = EditorGUI.TextField(new Rect(x, rect.y, nameW, lineHeight), item.title);
+
+                    if (GUI.Button(new Rect(x + nameW + 5, rect.y, moveW, lineHeight), ItemToggleLocalization.Get("btn_move_selected_here")))
+                    {
+                        var targetGroup = item;
+                        EditorApplication.delayCall += () => MoveSelectedToGroup(targetGroup);
+                    }
+
+                    if (GUI.Button(new Rect(x + nameW + moveW + 10, rect.y, btnW, lineHeight), ItemToggleLocalization.Get("btn_ungroup")))
+                    {
+                        int idxCapture = index; 
+                        EditorApplication.delayCall += () => UngroupItem(idxCapture);
+                    }
+
+                    // Renderers List
+                    if (item.isExpanded)
+                    {
+                        if (item.groupRenderers == null) item.groupRenderers = new List<Renderer>();
+                        
+                        float currentY = rect.y + lineHeight + 2;
+                        
+                        // Draw Existing
+                        for (int i = 0; i < item.groupRenderers.Count; i++)
+                        {
+                            var r = item.groupRenderers[i];
+                            var rRect = new Rect(x + 10, currentY, rect.width - (x - rect.x) - 30, lineHeight);
+                            
+                            EditorGUI.BeginChangeCheck();
+                            var newR = (Renderer)EditorGUI.ObjectField(rRect, r, typeof(Renderer), true);
+                            if (EditorGUI.EndChangeCheck())
+                            {
+                                item.groupRenderers[i] = newR;
+                                RemoveDuplicateRendererFromList(newR); // Auto Remove
+                            }
+
+                            if (GUI.Button(new Rect(rRect.xMax + 5, currentY, 20, lineHeight), "-"))
+                            {
+                                int rIdx = i;
+                                EditorApplication.delayCall += () => RemoveFromGroup(item, rIdx);
+                            }
+
+                            currentY += lineHeight + 2;
+                        }
+
+                        // Draw Add Field
+                        var addRect = new Rect(x + 10, currentY, rect.width - (x - rect.x) - 10, lineHeight);
+                        EditorGUI.BeginChangeCheck();
+                        var addedR = (Renderer)EditorGUI.ObjectField(addRect, null, typeof(Renderer), true);
+                        if (EditorGUI.EndChangeCheck() && addedR != null)
+                        {
+                            item.groupRenderers.Add(addedR);
+                            RemoveDuplicateRendererFromList(addedR); // Auto Remove
+                        }
+                        if (addedR == null)
+                        {
+                            var style = new GUIStyle(EditorStyles.label);
+                            style.normal.textColor = new Color(0.5f, 0.5f, 0.5f);
+                            style.fontStyle = FontStyle.Italic;
+                            EditorGUI.LabelField(addRect, "   " + ItemToggleLocalization.Get("tooltip_drag_renderer"), style);
+                        }
+                    }
+                }
+                else
+                {
+                    // Draw Single Item
+                    if (item.renderer == null) return;
+
+                    // == Custom Drag Handle ==
+                    // Use a subtle icon next to checkbox to indicate "Groupable"
+                    Rect handleRect = new Rect(x, rect.y, 16, lineHeight);
+                    GUI.Label(handleRect, "::", EditorStyles.centeredGreyMiniLabel); 
+                    
+                    if (Event.current.type == EventType.MouseDown && handleRect.Contains(Event.current.mousePosition))
+                    {
+                        DragAndDrop.PrepareStartDrag();
+                        DragAndDrop.SetGenericData("ItemToggle_Index", index);
+                        DragAndDrop.objectReferences = new UnityEngine.Object[] { item.renderer };
+                        DragAndDrop.StartDrag("Move Item");
+                        Event.current.Use();
+                    }
+
+                    x += 20;
+                    
+                    string path = GetRelativePath(item.renderer.transform);
+                    string label = $"{item.renderer.name}   <color=#888>({path})</color>";
+                    
+                    var style = new GUIStyle(EditorStyles.label) { richText = true };
+                    var c = GUI.color;
+                    GUI.color = item.renderer.enabled ? Color.white : new Color(1f, 1f, 1f, 0.6f);
+                    EditorGUI.LabelField(new Rect(x, rect.y, rect.width - x, lineHeight), label, style);
+                    GUI.color = c;
+                }
             }
         };
     }
@@ -410,7 +704,9 @@ public class ItemToggleMenuBuilder : EditorWindow
                 }
                 else
                 {
-                    if (!item.selected || item.renderer == null) continue;
+                    if (!item.selected) continue;
+                    if (!item.isGroup && item.renderer == null) continue;
+                    if (item.isGroup && (item.groupRenderers == null || item.groupRenderers.Count == 0)) continue;
 
                     // Ensure we have a submenu (Auto-create default group if missing)
                     if (currentSubMenu == null)
@@ -452,14 +748,17 @@ public class ItemToggleMenuBuilder : EditorWindow
                         currentGroupItemCount = 0;
                     }
 
-                    var r = item.renderer;
-                    string niceName = r.name;
-                    string param = MakeUniqueParam($"{parameterPrefix}{SanParam(niceName)}", maParams.parameters.Select(p => p.nameOrPrefix));
-                    bool defaultOn = r.enabled;
+                    string niceName = item.isGroup ? item.title : item.renderer.name;
+                    string safeName = SanParam(niceName);
+                    string param = MakeUniqueParam($"{parameterPrefix}{safeName}", maParams.parameters.Select(p => p.nameOrPrefix));
+                    
+                    bool defaultOn = false;
+                    if (item.isGroup) defaultOn = item.groupRenderers.All(r => r != null && r.enabled);
+                    else defaultOn = item.renderer.enabled;
 
                     // Create Animation
-                    var onClip = CreateSingleToggleClip(r, true, $"{assetFolder}/{San(param)}_On.anim");
-                    var offClip = CreateSingleToggleClip(r, false, $"{assetFolder}/{San(param)}_Off.anim");
+                    var onClip = CreateToggleClip(item, true, $"{assetFolder}/{San(param)}_On.anim");
+                    var offClip = CreateToggleClip(item, false, $"{assetFolder}/{San(param)}_Off.anim");
 
                     // Add Layer
                     var layerName = $"RT_{SanLayer(niceName)}"; 
@@ -481,7 +780,15 @@ public class ItemToggleMenuBuilder : EditorWindow
                         string absPath = assetFolder.StartsWith("Assets") 
                             ? Application.dataPath + assetFolder.Substring(6) 
                             : Path.GetFullPath(assetFolder);
-                        thumb = CaptureThumbnailAndSave(r.gameObject, absPath);
+                        
+                        if (item.isGroup)
+                        {
+                            thumb = CaptureThumbnailAndSaveForGroup(item.groupRenderers, absPath, niceName);
+                        }
+                        else
+                        {
+                            thumb = CaptureThumbnailAndSave(item.renderer.gameObject, absPath);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -839,19 +1146,78 @@ public class ItemToggleMenuBuilder : EditorWindow
         return $"{baseName}_{i}";
     }
 
-    private static AnimationClip CreateSingleToggleClip(Renderer r, bool enabled, string path)
+    private static AnimationClip CreateToggleClip(ToggleItem item, bool enabled, string path)
     {
         var clip = new AnimationClip { name = Path.GetFileNameWithoutExtension(path) };
-        var binding = new EditorCurveBinding
+        
+        var renderers = new List<Renderer>();
+        if (item.isGroup && item.groupRenderers != null) renderers.AddRange(item.groupRenderers);
+        else if (item.renderer != null) renderers.Add(item.renderer);
+
+        foreach (var r in renderers)
         {
-            type = typeof(GameObject),
-            path = GetRelativePath(r.transform),
-            propertyName = "m_IsActive"
-        };
-        var curve = new AnimationCurve(new Keyframe(0, enabled ? 1 : 0));
-        AnimationUtility.SetEditorCurve(clip, binding, curve);
+            if (r == null) continue;
+            var binding = new EditorCurveBinding
+            {
+                type = typeof(GameObject),
+                path = GetRelativePath(r.transform),
+                propertyName = "m_IsActive"
+            };
+            var curve = new AnimationCurve(new Keyframe(0, enabled ? 1 : 0));
+            AnimationUtility.SetEditorCurve(clip, binding, curve);
+        }
+
         AssetDatabase.CreateAsset(clip, path);
         return clip;
+    }
+
+    private static Texture2D CaptureThumbnailAndSaveForGroup(List<Renderer> renderers, string saveDirectory, string baseName)
+    {
+        if (renderers == null || renderers.Count == 0) return null;
+
+        // Create a temp root to hold clones
+        var tempGroupRoot = new GameObject(baseName + "_TempGroup");
+        try
+        {
+            // Calculate center
+            Bounds bounds = new Bounds();
+            bool hasBounds = false;
+            foreach(var r in renderers) 
+            {
+                if(r != null) 
+                {
+                    if(!hasBounds) { bounds = r.bounds; hasBounds = true; }
+                    else bounds.Encapsulate(r.bounds);
+                }
+            }
+            if(!hasBounds) bounds = new Bounds(Vector3.zero, Vector3.one);
+
+            tempGroupRoot.transform.position = bounds.center;
+
+            // Clone renderers
+            foreach(var r in renderers)
+            {
+                if(r == null) continue;
+                // Instantiate clone of gameObject
+                var clone = Instantiate(r.gameObject);
+                // Parent to temp root, keep world position
+                clone.transform.position = r.transform.position;
+                clone.transform.rotation = r.transform.rotation;
+                clone.transform.SetParent(tempGroupRoot.transform, true);
+            }
+
+            // Now capture
+            // We need to override the name for the file saving
+            // CaptureThumbnailAndSave uses target.name. So tempGroupRoot.name is used.
+            // We set tempGroupRoot name to baseName, so file will be baseName_Thumbnail.png
+            tempGroupRoot.name = baseName;
+
+            return CaptureThumbnailAndSave(tempGroupRoot, saveDirectory);
+        }
+        finally
+        {
+            if (tempGroupRoot != null) DestroyImmediate(tempGroupRoot);
+        }
     }
 
     private static void AddBinaryLayer(AnimCtrl ctrl, string layerName, string boolParam, AnimationClip onClip, AnimationClip offClip, bool defaultOn)
